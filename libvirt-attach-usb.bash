@@ -4,7 +4,7 @@ set -Eeo pipefail
 
 # Print usage information.
 usage() {
-	printf 'Usage: %s [-h] ["DOMAIN"] ["USB_ID"]\n' "$(basename "${BASH_SOURCE[0]}")"
+	printf 'Usage: %s [-h] ["DOMAIN"] ["USB_ID1,USB_ID2..."]\n' "$(basename "${BASH_SOURCE[0]}")"
 	printf '\n'
 	printf 'Script to help you attach or detach USB devices from a running libvirt virtual machine.\n'
 	printf 'They are optional but please respect the order of the parameters "DOMAIN" and "USB_ID".\n'
@@ -20,13 +20,16 @@ usage() {
 
 # Check if the required commands are available.
 command_check() {
-	COMMAND_LIST=(fzf virsh sudo grep cut awk grep printf lsusb tr sed cat)
+	COMMAND_LIST=(fzf virsh sudo cut awk grep printf lsusb tr sed cat)
 	for COMMAND in "${COMMAND_LIST[@]}"; do
 			if ! type -t "$COMMAND" >/dev/null; then
-				printf "Command %s not found.\n" "$COMMAND" >&2
-				exit 1
+				MISSING_COMMANDS+=("$COMMAND")
 			fi
 	done
+	if [ ${#MISSING_COMMANDS[@]} -gt 0 ]; then
+		printf "Missing commands: %s\n" "${MISSING_COMMANDS[*]}"
+		exit 1
+	fi
 }
 
 # Authenticate before piping to fzf.
@@ -55,8 +58,13 @@ domain_get() {
 
 # Check if the USB ID matches what lsusb knows.
 usb_check() {
-	if ! lsusb | grep -q "$USB_ID"; then
-		printf "USB device ID is incorrect or not plugged.\n" >&2
+	for USB_DEV_ID in "${USB_ID[@]}"; do
+		if ! lsusb | grep -q "$USB_DEV_ID"; then
+			USB_NOT_FOUND+=("$USB_DEV_ID")
+			printf "USB ID %s is incorrect or not plugged.\n" "${USB_DEV_ID}" >&2
+		fi
+	done
+	if [ ${#USB_NOT_FOUND[@]} -gt 0 ]; then
 		exit 1
 	fi
 }
@@ -64,14 +72,18 @@ usb_check() {
 # Get USB ID from command line input or from a fzf list.
 usb_get() {
 	if [[ -z "${1}" && -v DOMAIN ]]; then
-		USB=$(lsusb | fzf)
-		USB_ID=$(printf "%s" "$USB" | awk '{print $6}')
-		VENDOR_ID=$(printf "%s" "$USB_ID" | cut -d ":" -f1)
-		PRODUCT_ID=$(printf "%s" "$USB_ID" | cut -d ":" -f2)
-	else	
-		USB_ID="$1"
-		VENDOR_ID=$(printf "%s" "$USB_ID" | cut -d ":" -f1)
-		PRODUCT_ID=$(printf "%s" "$USB_ID" | cut -d ":" -f2)
+		IFS=$'\n'
+		USB=$(lsusb | fzf -m)
+		unset IFS
+		for USB_DEV in "${USB[@]}"; do
+			# shellcheck disable=SC2207
+			USB_ID+=($(printf "%s" "${USB_DEV}" | awk '{print $6}'))
+		done
+	else
+		USB_ID_LIST="$1"
+		IFS=","
+		read -a USB_ID -r <<< "$USB_ID_LIST"
+		unset IFS
 	fi
 	usb_check
 }
@@ -111,39 +123,53 @@ list_usb_devices() {
 
 # Attach USB device to a running libvirt machine.
 attach_usb_device() {
-	if [[ -n "$DOMAIN" && "$USB_ID" ]]; then
-		XML_FILE=$(mktemp)
-		XML_CONTENT=$(cat <<-EOF
-		<hostdev mode='subsystem' type='usb' managed='yes'>
-			<source>
-				<vendor id='0x${VENDOR_ID}'/>
-				<product id='0x${PRODUCT_ID}'/>
-			</source>
-		</hostdev>
-		EOF
-				)
-		printf "%s" "$XML_CONTENT" >"$XML_FILE"
-		VIRSH_ATTACH_OUTPUT=$(sudo virsh attach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null || sudo virsh detach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null)
-		case "$VIRSH_ATTACH_OUTPUT" in
-			*"attached"*)
-				printf "Device %s attached succesfully to the domain %s.\n" "$USB_ID" "$DOMAIN"
-				;;
-			*"detached"*)
-				printf "Device %s detached succesfully from the domain %s.\n" "$USB_ID" "$DOMAIN"
-				;;
-		esac
-		rm "$(mktemp)" 2>/dev/null
+	if [[ -n "$DOMAIN" && "${#USB_ID[@]}" -gt 0 ]]; then
+		for USB_DEV_ID in "${USB_ID[@]}"; do
+			VENDOR_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f1)
+			PRODUCT_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f2)
+			XML_FILE=$(mktemp)
+			XML_CONTENT=$(cat <<-EOF
+			<hostdev mode='subsystem' type='usb' managed='yes'>
+				<source>
+					<vendor id='0x${VENDOR_ID}'/>
+					<product id='0x${PRODUCT_ID}'/>
+				</source>
+			</hostdev>
+			EOF
+					)
+			printf "%s" "$XML_CONTENT" >"$XML_FILE"
+			VIRSH_ATTACH_OUTPUT=$(sudo virsh attach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null || sudo virsh detach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null)
+			case "$VIRSH_ATTACH_OUTPUT" in
+				*"attached"*)
+					printf "Device %s attached succesfully to the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+					;;
+				*"detached"*)
+					printf "Device %s detached succesfully from the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+					;;
+			esac
+			#rm "$(mktemp)" 2>/dev/null
+		done
 	fi
 }
 
 detach_usb_device() {
 	domain_get "$1"
 	domain_check
-	USB_LIST=$(list_usb_devices "$DOMAIN")
-	USB=$(printf "%s" "$USB_LIST" | fzf)
-	USB_ID=$(printf "%s" "$USB" | awk '{print $6}')
-	VENDOR_ID=$(printf "%s" "$USB_ID" | cut -d ":" -f1)
-	PRODUCT_ID=$(printf "%s" "$USB_ID" | cut -d ":" -f2)
+	if [[ -z "${2}" && -v DOMAIN ]]; then
+		IFS=$'\n'
+		USB=$(list_usb_devices "$DOMAIN" | fzf -m)
+		unset IFS
+		for USB_DEV in "${USB[@]}"; do
+			# shellcheck disable=SC2207
+			USB_ID+=($(printf "%s" "${USB_DEV}" | awk '{print $6}'))
+		done
+	else
+		USB_ID_LIST="${2}"
+		IFS=","
+		read -a USB_ID -r <<< "$USB_ID_LIST"
+		unset IFS
+	fi
+	usb_check
 	attach_usb_device
 	exit 0
 }
@@ -156,7 +182,7 @@ while [ $# -gt 0 ]; do
 	case "${1-}" in
 		-h | --help) usage ;;
 		-l | --list) list_usb_devices "$2" ;;
-		-d | --detach) detach_usb_device "$2" ;;
+		-d | --detach) detach_usb_device "$2" "$3" ;;
 		-?*) printf "Unknown option: %s\n" "$1" >&2; exit 1 ;;
 		*) break ;;
 	esac
@@ -171,4 +197,3 @@ usb_get "$2"
 
 # Attach USB device to the running libvirt domain.
 attach_usb_device
-
