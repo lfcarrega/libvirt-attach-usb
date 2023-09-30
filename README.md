@@ -1,6 +1,6 @@
 ### Demo
 Here is a demonstration of the script working:
-![](https://github.com/lfcarrega/libvirt-attach-usb/blob/master/demo.gif)
+![](https://github.com/lfcarrega/libvirt-attach-usb/blob/main/demo.gif)
 
 ### Description
 Script to help you attach or detach USB devices from a running libvirt virtual machine.
