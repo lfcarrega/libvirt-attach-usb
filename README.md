@@ -31,6 +31,7 @@ libvirt-attach-usb.bash [-h] ["DOMAIN"] ["USB_ID1,USB_ID2"]
 ```
 
 DOMAIN and USB_ID are optional. If empty, the script will use fzf to help you select the desired domain and USB device.
+
 NOTE: Use Tab or Shift+Tab to select multiple USB devices.
 
 Print the usage information:
