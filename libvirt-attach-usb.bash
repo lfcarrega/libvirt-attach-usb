@@ -147,7 +147,7 @@ attach_usb_device() {
 					printf "Device %s detached succesfully from the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
 					;;
 			esac
-			#rm "$(mktemp)" 2>/dev/null
+			rm "$(mktemp)" 2>/dev/null
 		done
 	fi
 }
