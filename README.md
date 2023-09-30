@@ -1,5 +1,5 @@
 ### Demo
-Here is a demonstration of the script working:
+Here is a demonstration of the script working from a SSH session on Windows:
 ![](https://github.com/lfcarrega/libvirt-attach-usb/blob/main/demo.gif)
 
 ### Description
@@ -17,6 +17,12 @@ The script depends on:
 * sed
 * cat
 * sudo
+
+### Installation
+
+```sh
+wget https://raw.githubusercontent.com/lfcarrega/libvirt-attach-usb/main/libvirt-attach-usb.bash -O $HOME/.local/bin/libvirt-attach-usb
+```
 
 ### Usage
 
