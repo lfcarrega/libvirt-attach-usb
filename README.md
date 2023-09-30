@@ -1,3 +1,7 @@
+### Demo
+Here is a demonstration of the script working:
+![](https://github.com/libvirt-attach-usb/demo.gif)
+
 ### Description
 Script to help you attach or detach USB devices from a running libvirt virtual machine.
 
