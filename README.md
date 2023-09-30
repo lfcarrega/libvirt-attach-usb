@@ -17,7 +17,7 @@ The script depends on:
 ### Usage
 
 ```sh
-libvirt-attach-usb.bash [-h] ["DOMAIN"] ["USB_ID"]
+libvirt-attach-usb.bash [-h] ["DOMAIN"] ["USB_ID1,USB_ID2"]
 ```
 
 DOMAIN and USB_ID are optional. If empty, the script will use fzf to help you select the desired domain and USB device.
@@ -45,4 +45,4 @@ Attach/detach USB device from domain:
 libvirt-attach-usb.bash DOMAIN_NAME USB_ID
 ``` 
 
-The '-d/--detach' option should list only the attached USB devices.
+The '-d/--detach' option should list the attached USB devices.
