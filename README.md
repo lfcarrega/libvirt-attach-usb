@@ -21,7 +21,7 @@ The script depends on:
 ### Installation
 
 ```sh
-wget https://raw.githubusercontent.com/lfcarrega/libvirt-attach-usb/main/libvirt-attach-usb.bash -O $HOME/.local/bin/libvirt-attach-usb
+mkdir -p $HOME/.local/bin && wget https://raw.githubusercontent.com/lfcarrega/libvirt-attach-usb/main/libvirt-attach-usb.bash -O $HOME/.local/bin/libvirt-attach-usb && chmod +x $HOME/.local/bin/libvirt-attach-usb
 ```
 
 ### Usage
