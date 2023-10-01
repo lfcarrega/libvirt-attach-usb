@@ -113,8 +113,6 @@ list_usb_devices() {
 		USB_INFO=$(lsusb -d "$VENDOR:$PRODUCT" 2>/dev/null)
 		if [[ -n $USB_INFO ]]; then
 			printf "%s\n" "$USB_INFO"
-		else
-			printf "Couldn't retrieve information for Vendor:Product = %s\n" "$VENDOR_PRODUCT" >&2
 		fi
 	done
 
