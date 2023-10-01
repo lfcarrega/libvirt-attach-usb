@@ -21,7 +21,7 @@ Bash script to help you attach or detach USB devices from a running libvirt virt
 ### Installation
 
 ```sh
-mkdir -p $HOME/.local/bin && wget https://raw.githubusercontent.com/lfcarrega/libvirt-attach-usb/main/libvirt-attach-usb.bash -O $HOME/.local/bin/libvirt-attach-usb && chmod +x $HOME/.local/bin/libvirt-attach-usb
+mkdir -p $HOME/.local/bin && wget https://raw.githubusercontent.com/lfcarrega/libvirt-attach-usb/main/libvirt-attach-usb -O $HOME/.local/bin/libvirt-attach-usb && chmod +x $HOME/.local/bin/libvirt-attach-usb
 ```
 
 ### Usage
