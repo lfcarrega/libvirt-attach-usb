@@ -22,10 +22,10 @@ mkdir -p $HOME/.local/bin && wget https://raw.githubusercontent.com/lfcarrega/li
 
 Available options:
 
--l | --list <domain>\
--d | --detach-usb <domain> <usb_id1.usb_id2>\
--a | --attach-usb <domain> <usb_id1,usb_id2>\
--r | --remove-usb <domain>\
+-l | --list [domain>]\
+-d | --detach-usb [domain] [usb_id1.usb_id2]\
+-a | --attach-usb [domain] [usb_id1,usb_id2]\
+-r | --remove-usb [domain]\
 -u | --list-iso (NOT IMPLEMENTED YET)\
--i | --insert-iso /path/to/iso <domain> <cdrom_target>\
+-i | --insert-iso /path/to/iso [domain] [cdrom_target]\
 -e | --eject-iso (NOT IMPLEMENTED YET)\
