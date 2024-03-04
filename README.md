@@ -22,7 +22,7 @@ mkdir -p $HOME/.local/bin && wget https://raw.githubusercontent.com/lfcarrega/li
 
 Available options:
 
--l | --list [domain>]\
+-l | --list [domain]\
 -d | --detach-usb [domain] [usb_id1.usb_id2]\
 -a | --attach-usb [domain] [usb_id1,usb_id2]\
 -r | --remove-usb [domain]\
