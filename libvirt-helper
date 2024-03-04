@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+
+# Print the usage information.
+USAGE() {
+    SCRIPT_NAME=$(basename "${BASH_SOURCE[0]}")
+    cat <<EOF
+Usage: $SCRIPT_NAME [option]
+
+Options:
+  -h, --help                                               Print this help message.
+  -l, --list-usb [DOMAIN]                                  List attached USB devices.
+  -d, --detach-usb [DOMAIN] [USB_ID1,USB_ID2...]           Detach USB device.
+  -a, --attach-usb [DOMAIN] [USB_ID1,USB_ID2...]           Attach USB device.
+  -r, --remove-usb [DOMAIN]				   Remove unavailable USB devices from the domain XML.
+  -u, --list-iso [DOMAIN] [TARGET_DEVICE]                  List attached iso.
+  -i, --insert-iso /path/to/iso [DOMAIN] [TARGET_DEVICE]   Attach iso file.
+  -e, --eject-iso DOMAIN] [TARGET_DEVICE]                  Detach iso file.
+EOF
+    exit 0 
+}
+
+# Check if all dependencies are satisfied.
+DEPENDENCIES_CHECK() {
+	COMMAND_LIST=(comm fzf lsusb sudo virsh xmllint)
+	for COMMAND in "${COMMAND_LIST[@]}"; do
+			if ! type -t "$COMMAND" >/dev/null; then
+				MISSING_COMMANDS+=("$COMMAND")
+			fi
+	done
+	if [ ${#MISSING_COMMANDS[@]} -gt 0 ]; then
+		printf "Missing commands: %s\n" "${MISSING_COMMANDS[*]}"
+		exit 1
+	fi
+}
+
+# Check if the domain name is correct.
+DOMAIN_CHECK() {
+	if ! sudo virsh list --name --all 2>/dev/null | grep -swq "$DOMAIN" 2>/dev/null; then
+		printf "Domain name %s is incorrect.\n" "$DOMAIN" >&2
+		exit 1
+	fi
+}
+
+# Get domain from command line/fzf.
+DOMAIN_GET() {
+	if [ -z "$1" ]; then
+		DOMAIN_LIST=$(sudo virsh list --name --all 2>/dev/null | sed '/^$/d')
+		DOMAIN=$(printf "%s" "$DOMAIN_LIST" | fzf --header="available libvirt domains")
+		if [[ -z "${DOMAIN}" ]]; then
+			exit 0
+		fi
+	else
+		DOMAIN="$1"
+	fi
+	DOMAIN_CHECK
+}
+
+# Verify if the informed USB ID is correct.
+USB_CHECK() {
+	for USB_DEV_ID in "${USB_ID[@]}"; do
+		if ! lsusb | grep -swq "$USB_DEV_ID"; then
+			USB_NOT_FOUND+=("$USB_DEV_ID")
+			printf "Device %s is incorrect or not plugged to the host.\n" "${USB_DEV_ID}" >&2
+		else
+			VALID_USB_ID+=("$USB_DEV_ID")
+		fi
+	done
+}
+
+# Get USB ID from command line input or from a fzf list.
+USB_GET() {
+	if [[ -z "${1}" && -v DOMAIN ]]; then
+		IFS=$'\n'
+		if [[ -n ${ATTACHED_USB_LIST} ]]; then
+			LSUSB_LIST=$(lsusb)
+			DETTACHED_USB=$(comm -23 <( printf "%b" "${LSUSB_LIST}" | sort ) <( printf "%b" "${ATTACHED_USB_LIST}" | sort ))
+			USB=$(printf "%s" "$DETTACHED_USB" | fzf -m --header="$DOMAIN - available USB devices (Tab/Shift+Tab to select)")
+		else
+			USB="$(lsusb | fzf -m --header="$DOMAIN - available USB devices (Tab/Shift+Tab to select)")"
+		fi
+		unset IFS
+		for USB_DEV in "${USB[@]}"; do
+			# shellcheck disable=SC2207
+			USB_ID+=($(printf "%s" "${USB_DEV}" | awk '{print $6}'))
+		done
+	else
+		USB_ID_LIST="$1"
+		IFS=","
+		read -a USB_ID -r <<< "$USB_ID_LIST"
+		unset IFS
+	fi
+	USB_CHECK
+}
+
+# List attached USB devices.
+LIST_ATTACHED_USB() {
+	if [[ -z "${DOMAIN}" && -z "${ATTACH_MODE}" ]]; then DOMAIN_GET "$1"; fi
+	if [[ -n "$DOMAIN" && -z "${ATTACH_MODE}" ]]; then DOMAIN_CHECK "$1"; fi
+	IFS=','
+	ATTACHED_VENDOR=$(sudo virsh dumpxml "$DOMAIN" | xmllint --xpath "//domain/devices/hostdev[@type='usb']/source/vendor" - 2>/dev/null | grep -oP 'vendor id="\K[^"]+' | tr '\n' ',' | sed '$s/,$/\n/')
+	ATTACHED_PRODUCT=$(sudo virsh dumpxml "$DOMAIN" | xmllint --xpath "//domain/devices/hostdev[@type='usb']/source/product" - 2>/dev/null | grep -oP 'product id="\K[^"]+' | tr '\n' ',' | sed '$s/,$/\n/' 2>/dev/null)
+	read -a VENDOR_ID_LIST -r <<< "$ATTACHED_VENDOR"
+	read -a PRODUCT_ID_LIST -r <<< "$ATTACHED_PRODUCT"
+	unset IFS
+	for i in "${!VENDOR_ID_LIST[@]}"; do
+		if [[ "$(lsusb -d "${VENDOR_ID_LIST[i]}:${PRODUCT_ID_LIST[i]}" 2>/dev/null)" ]]; then
+			ATTACHED_USB_LIST+="$(lsusb -d "${VENDOR_ID_LIST[i]}:${PRODUCT_ID_LIST[i]}" 2>/dev/null)\n"
+		else
+			INVALID_USB+="$(printf "%s:%s" "${VENDOR_ID_LIST[i]}" "${PRODUCT_ID_LIST[i]}"),"
+		fi
+	done
+	if [[ -z "${ATTACH_MODE}" && -z "${CLEAR_USB}" ]]; then
+		printf "%b" "$ATTACHED_USB_LIST"
+		exit 0
+	fi
+}
+
+CLEAR_USB() {
+	CLEAR_USB=1
+	if [[ -z "$DOMAIN" ]]; then DOMAIN_GET "$1"; fi
+	LIST_ATTACHED_USB
+	if [[ -n "${INVALID_USB}" ]]; then
+		INVALID_USB="$(printf "%s" "$INVALID_USB" | sed 's/,$//')"
+		IFS=","
+		read -a INVALID_USB_LIST -r <<< "${INVALID_USB}"
+		unset IFS
+		for USB_DEV_ID in "${INVALID_USB_LIST[@]}"; do
+			VENDOR_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f1)
+			PRODUCT_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f2)
+                        XML_FILE=$(mktemp)
+                        XML_CONTENT=$(cat <<-EOF
+                        <hostdev mode='subsystem' type='usb' managed='yes'>
+                                <source>
+                                        <vendor id='${VENDOR_ID}'/>
+                                        <product id='${PRODUCT_ID}'/>
+                                </source>
+                        </hostdev>
+			EOF
+                                        )
+                        printf "%s" "$XML_CONTENT" >"$XML_FILE"
+                        VIRSH_ATTACH_OUTPUT=$(sudo virsh detach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null)
+                        case "$VIRSH_ATTACH_OUTPUT" in
+                                *"detached"*)
+                                        printf "Device %s detached succesfully from the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+                                        ;;
+			esac
+			rm "$XML_FILE" 2>/dev/null
+		done
+	fi
+	unset CLEAR_USB
+}
+
+# Attach USB device to the specified domain.
+ATTACH_USB() {
+	ATTACH_MODE="1"
+	if [[ -z "$DOMAIN" ]]; then DOMAIN_GET "$1"; fi
+	if [[ -n "$DOMAIN" ]]; then DOMAIN_CHECK "$1"; fi
+	LIST_ATTACHED_USB
+	if [[ "${#USB_ID[@]}" -eq 0 ]]; then USB_GET "$2"; fi
+	if [[ -n "$DOMAIN" && "${#USB_ID[@]}" -gt 0 ]]; then
+		for USB_DEV_ID in "${VALID_USB_ID[@]}"; do
+			VENDOR_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f1)
+			PRODUCT_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f2)
+			XML_FILE=$(mktemp)
+			XML_CONTENT=$(cat <<-EOF
+			<hostdev mode='subsystem' type='usb' managed='yes'>
+				<source>
+					<vendor id='0x${VENDOR_ID}'/>
+					<product id='0x${PRODUCT_ID}'/>
+				</source>
+			</hostdev>
+			EOF
+					)
+			printf "%s" "$XML_CONTENT" >"$XML_FILE"
+			VIRSH_ATTACH_OUTPUT=$(sudo virsh attach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null)
+			case "$VIRSH_ATTACH_OUTPUT" in
+				*"attached"*)
+					printf "Device %s attached succesfully to the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+					;;
+				*)
+					printf "Device %s already attached to the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+			esac
+			rm "$XML_FILE" 2>/dev/null
+		done
+	fi
+	unset ATTACH_MODE
+}
+
+# Detach USB device to the specified domain.
+DETACH_USB() {
+	if [[ -z "$DOMAIN" ]]; then DOMAIN_GET "$1"; fi
+	if [[ -n "$DOMAIN" ]]; then DOMAIN_CHECK "$1"; fi
+	if [[ -z "${2}" && -v DOMAIN ]]; then
+		IFS=$'\n'
+		USB=$(LIST_ATTACHED_USB "$DOMAIN" | fzf -m --header="${DOMAIN} - plugged USB devices (Tab/Shift+Tab to select)")
+		if [[ -z ${USB} ]]; then exit; fi
+		unset IFS
+		for USB_DEV in "${USB[@]}"; do
+			# shellcheck disable=SC2207
+			USB_ID+=($(printf "%s" "${USB_DEV}" | awk '{print $6}'))
+		done
+	else
+		USB_ID_LIST="${2}"
+		IFS=","
+		read -a USB_ID -r <<< "$USB_ID_LIST"
+		unset IFS
+	fi
+	USB_CHECK
+	ATTACH_MODE="1"
+	LIST_ATTACHED_USB
+	if [[ "${#USB_ID[@]}" -eq 0 ]]; then USB_GET "$2"; fi
+	if [[ -n "$DOMAIN" && "${#USB_ID[@]}" -gt 0 ]]; then
+		for USB_DEV_ID in "${VALID_USB_ID[@]}"; do
+			VENDOR_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f1)
+			PRODUCT_ID=$(printf "%s" "${USB_DEV_ID}" | cut -d ':' -f2)
+			XML_FILE=$(mktemp)
+			XML_CONTENT=$(cat <<-EOF
+			<hostdev mode='subsystem' type='usb' managed='yes'>
+				<source>
+					<vendor id='0x${VENDOR_ID}'/>
+					<product id='0x${PRODUCT_ID}'/>
+				</source>
+			</hostdev>
+			EOF
+					)
+			printf "%s" "$XML_CONTENT" >"$XML_FILE"
+			VIRSH_ATTACH_OUTPUT=$(sudo virsh detach-device "$DOMAIN" --file "$XML_FILE" --current 2>/dev/null)
+			case "$VIRSH_ATTACH_OUTPUT" in
+				*"detached"*)
+					printf "Device %s detached succesfully from the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+					;;
+				*)
+					printf "Device %s already detached from the domain %s.\n" "$USB_DEV_ID" "$DOMAIN"
+			esac
+			rm "$XML_FILE" 2>/dev/null
+		done
+	fi
+	unset ATTACH_MODE
+	exit 0
+}
+
+INSERT_ISO() {
+	if [[ -z "${1}" ]]; then
+		printf "Missing path for the iso file.\n"
+		exit 1
+	fi
+	if [[ -z "${2}" && -z "${DOMAIN}" ]]; then
+		DOMAIN_GET
+	else
+		DOMAIN_CHECK "${2}"
+	fi
+
+	if [[ -z "${3}" ]]; then
+		ISO_TARGET_DEV_LIST=$(sudo virsh dumpxml "${DOMAIN}" | xmllint --xpath "//domain/devices/disk[@device='cdrom']/target[@dev]" - | grep -oP 'dev="\K[^"]+')
+		ISO_TARGET_DEV=$(printf "%s" "${ISO_TARGET_DEV_LIST}" | fzf --header="$DOMAIN - available CDROM devices")
+	else
+		ISO_TARGET_DEV="${3}"
+	fi
+	if [[ -v ISO_TARGET_DEV && -v DOMAIN ]]; then
+		sudo virsh attach-disk "${DOMAIN}" "${1}" "$ISO_TARGET_DEV" --type cdrom --mode readonly
+	fi
+	exit 0
+}
+
+# Call function to check the needed commands.
+DEPENDENCIES_CHECK
+
+# Parameter handling.
+while [ $# -gt 0 ]; do
+	case "${1-}" in
+		-h | --help) USAGE ;;
+		-l | --list) LIST_ATTACHED_USB "$2" ;;
+		-d | --detach-usb) DETACH_USB "$2" "$3" ;;
+		-a | --attach-usb) ATTACH_USB "$2" "$3" ;;
+		-r | --remove-usb) CLEAR_USB "$2" ;;
+		-u | --list-iso) LIST_INSERTED_ISO "$2" "$3" ;;
+		-i | --insert-iso) INSERT_ISO "$2" "$3" "$4" ;;
+		-e | --eject-iso) EJECT_ISO "$2" "$3" ;;
+		-?*) printf "Unknown option: %s\n" "$1" >&2; exit 1 ;;
+		*) break ;;
+	esac
+	shift
+done
