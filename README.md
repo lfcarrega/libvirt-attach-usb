@@ -3,7 +3,7 @@ Here is a demonstration of the script working from a SSH session on Windows:
 ![](https://github.com/lfcarrega/libvirt-attach-usb/blob/main/demo.gif)
 
 ### Description
-Bash script to help you attach or detach USB devices from a running libvirt virtual machine.
+Bash script to help you attach or detach USB devices, ISO's and ~maybe~ block devices from a running libvirt (virsh) virtual machine.
 
 ### Dependencies
 * virsh
