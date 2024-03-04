@@ -28,4 +28,4 @@ Available options:
 -r | --remove-usb [domain]\
 -u | --list-iso (NOT IMPLEMENTED YET)\
 -i | --insert-iso /path/to/iso [domain] [cdrom_target]\
--e | --eject-iso (NOT IMPLEMENTED YET)\
+-e | --eject-iso (NOT IMPLEMENTED YET)
