@@ -1,5 +1,5 @@
 ### Demo
-Here is a demonstration of the script working from a SSH session on Windows:
+Here is a demonstration of the script working from a SSH session on Windows - outdated, but you'll get it:
 ![](https://github.com/lfcarrega/libvirt-attach-usb/blob/main/demo.gif)
 
 ### Description
